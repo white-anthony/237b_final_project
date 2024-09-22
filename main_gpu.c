@@ -6,6 +6,7 @@
 
 #define KERNEL_PATH "kernel.cl"
 
+// Function to check and handle OpenCL errors
 void checkError(cl_int err, const char* op) {
     if (err != CL_SUCCESS) {
         fprintf(stderr, "Error during operation '%s': %d\n", op, err);
@@ -13,6 +14,7 @@ void checkError(cl_int err, const char* op) {
     }
 }
 
+// Function to read the kernel source code
 char* readKernelSource(const char* kernelPath) {
     FILE *fp;
     long length;
@@ -65,11 +67,12 @@ int main() {
     err = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_GPU, 1, &device_id, NULL);
     checkError(err, "clGetDeviceIDs");
 
-    // Create OpenCL context and command queue
+    // Create OpenCL context and command queue with profiling enabled
     context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &err);
     checkError(err, "clCreateContext");
 
-    queue = clCreateCommandQueue(context, device_id, 0, &err);
+    // Enable profiling in the command queue
+    queue = clCreateCommandQueue(context, device_id, CL_QUEUE_PROFILING_ENABLE, &err);
     checkError(err, "clCreateCommandQueue");
 
     // Create buffers
@@ -106,20 +109,44 @@ int main() {
 
     // Execute the kernel
     size_t globalSize = num_bits;
-    clock_t start = clock();
-    err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &globalSize, NULL, 0, NULL, NULL);
+
+    // Profiling variables
+    cl_event kernel_event, read_event, write_event;
+    cl_ulong start, end;
+    double kernel_exec_time, read_time, write_time;
+
+    // Enqueue write operation to input buffer (profiling event created)
+    err = clEnqueueWriteBuffer(queue, inputBuffer, CL_TRUE, 0, sizeof(int) * num_bits, input_bits, 0, NULL, &write_event);
+    checkError(err, "clEnqueueWriteBuffer");
+
+    // Enqueue the kernel (profiling event created)
+    err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &globalSize, NULL, 0, NULL, &kernel_event);
     checkError(err, "clEnqueueNDRangeKernel");
 
-    // Wait for the command queue to complete
-    clFinish(queue);
-    clock_t end = clock();
-
-    double gpu_time = ((double)(end - start)) / CLOCKS_PER_SEC;
-    printf("GPU Time: %f seconds\n", gpu_time);
-
-    // Read the output buffer back to host
-    err = clEnqueueReadBuffer(queue, outputBuffer, CL_TRUE, 0, sizeof(float) * num_bits, modulated_signal, 0, NULL, NULL);
+    // Enqueue read operation from output buffer (profiling event created)
+    err = clEnqueueReadBuffer(queue, outputBuffer, CL_TRUE, 0, sizeof(float) * num_bits, modulated_signal, 0, NULL, &read_event);
     checkError(err, "clEnqueueReadBuffer");
+
+    // Wait for all commands to complete
+    clFinish(queue);
+
+    // Calculate profiling data
+    clGetEventProfilingInfo(write_event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+    clGetEventProfilingInfo(write_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+    write_time = (end - start) / 1000000.0; // Convert to milliseconds
+
+    clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+    clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+    kernel_exec_time = (end - start) / 1000000.0; // Convert to milliseconds
+
+    clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+    clGetEventProfilingInfo(read_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+    read_time = (end - start) / 1000000.0; // Convert to milliseconds
+
+    // Print profiling results
+    printf("Kernel execution time: %f ms\n", kernel_exec_time);
+    printf("Memory write time: %f ms\n", write_time);
+    printf("Memory read time: %f ms\n", read_time);
 
     // Cleanup
     clReleaseMemObject(inputBuffer);
