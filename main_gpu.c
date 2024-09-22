@@ -1,12 +1,40 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include "device.h"
+#include "kernel.h"
+
+#define KERNEL_PATH "kernel.cl"
 
 void checkError(cl_int err, const char* op) {
     if (err != CL_SUCCESS) {
         fprintf(stderr, "Error during operation '%s': %d\n", op, err);
         exit(1);
     }
+}
+
+char* readKernelSource(const char* kernelPath) {
+    FILE *fp;
+    long length;
+    char *source;
+
+    fp = fopen(kernelPath, "rb");
+    if (!fp) {
+        fprintf(stderr, "Failed to load kernel file.\n");
+        exit(1);
+    }
+
+    fseek(fp, 0, SEEK_END);
+    length = ftell(fp);
+    rewind(fp);
+
+    source = (char*)malloc(length + 1);
+    source[length] = '\0';
+
+    fread(source, sizeof(char), length, fp);
+    fclose(fp);
+
+    return source;
 }
 
 int main() {
@@ -50,6 +78,9 @@ int main() {
 
     outputBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * num_bits, NULL, &err);
     checkError(err, "clCreateBuffer(output)");
+
+    // Read the kernel source from file using KERNEL_PATH
+    char *kernelSource = readKernelSource(KERNEL_PATH);
 
     // Create the program from source
     program = clCreateProgramWithSource(context, 1, (const char**)&kernelSource, NULL, &err);
@@ -100,6 +131,7 @@ int main() {
 
     free(input_bits);
     free(modulated_signal);
+    free(kernelSource);
 
     return 0;
 }
